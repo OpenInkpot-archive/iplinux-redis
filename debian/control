@@ -1,7 +1,7 @@
 Source: redis
-Section: database
+Section: host/tools
 Priority: optional
-Maintainer: Chris Lamb <lamby@debian.org>
+Maintainer: Mikhail Gusarov <dottedmag@dottedmag.net>
 Build-Depends: debhelper (>= 7.0.50)
 Standards-Version: 3.9.1
 Homepage: http://code.google.com/p/redis/
@@ -19,7 +19,6 @@ Description: Persistent key-value database with network interface
  The dataset is stored entirely in memory and periodically flushed to disk.
 
 Package: redis-doc
-Section: doc
 Architecture: all
 Depends: ${misc:Depends}
 Description: Persistent key-value database with network interface (Documentation)
