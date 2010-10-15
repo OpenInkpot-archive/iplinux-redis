@@ -27,7 +27,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#define REDIS_VERSION "2.0.1"
+#define REDIS_VERSION "2.0.3"
 
 #include "fmacros.h"
 #include "config.h"
@@ -2296,9 +2296,6 @@ static void call(redisClient *c, struct redisCommand *cmd) {
 static int processCommand(redisClient *c) {
     struct redisCommand *cmd;
 
-    /* Free some memory if needed (maxmemory setting) */
-    if (server.maxmemory) freeMemoryIfNeeded();
-
     /* Handle the multi bulk command type. This is an alternative protocol
      * supported by Redis in order to receive commands that are composed of
      * multiple binary-safe "bulk" arguments. The latency of processing is
@@ -2430,7 +2427,12 @@ static int processCommand(redisClient *c) {
         return 1;
     }
 
-    /* Handle the maxmemory directive */
+    /* Handle the maxmemory directive.
+     *
+     * First we try to free some memory if possible (if there are volatile
+     * keys in the dataset). If there are not the only thing we can do
+     * is returning an error. */
+    if (server.maxmemory) freeMemoryIfNeeded();
     if (server.maxmemory && (cmd->flags & REDIS_CMD_DENYOOM) &&
         zmalloc_used_memory() > server.maxmemory)
     {
@@ -7634,6 +7636,22 @@ static void blockForKeys(redisClient *c, robj **keys, int numkeys, time_t timeou
     list *l;
     int j;
 
+    /* Never block for keys when the AOF is being replayed.
+     *
+     * When a BPOP is issued against an expiring list, the list is expired
+     * by means of the delete-on-write semantic, which causes the BPOP
+     * command to be written to the AOF. Then, the BPOP ends up in a blocking
+     * state and waits for a PUSH on any given key from another client.
+     *
+     * On replay, the expiring list will also be expired (if it isn't already),
+     * and the fake AOF client will block for a push. When multiple BPOPs
+     * (issued by multiple clients) are written to the AOF, this can cause the
+     * same blocking code to be executed against the single fake AOF client,
+     * which in turn can place the client in the list(s) of blocking clients
+     * *multiple times*. This state should be prevented, so simply skip
+     * blocking for the fake AOF client. */
+    if (c->fd < 0) return;
+
     c->blockingkeys = zmalloc(sizeof(robj*)*numkeys);
     c->blockingkeysnum = numkeys;
     c->blockingto = timeout;
@@ -8227,6 +8245,7 @@ static void freeMemoryIfNeeded(void) {
                     }
                 }
                 deleteKey(server.db+j,minkey);
+                server.stat_expiredkeys++;
             }
         }
         if (!freed) return; /* nothing to free... */
